@@ -55,25 +55,48 @@ def _is_pytest_fixture(decorator, fixture=True, yield_fixture=True):
     return False
 
 
-def _is_class_autouse_fixture(function):
+
+def _is_pytest_fixture(decorator, fixture=True, yield_fixture=True):
+    to_check = set()
+
+    if fixture:
+        to_check.add('fixture')
+
+    if yield_fixture:
+        to_check.add('yield_fixture')
+
+    def _check_attribute(attr):
+        """
+        handle astroid.Attribute, i.e., when the fixture function is
+        used by importing the pytest module
+        """
+        return attr.attrname in to_check and attr.expr.name == 'pytest'
+
+    def _check_name(name_):
+        """
+        handle astroid.Name, i.e., when the fixture function is
+        directly imported
+        """
+        function_name = decorator.name
+        module_name = decorator.root().globals[function_name][0].modname
+        return function_name in to_check and module_name == 'pytest'
+
     try:
-        for decorator in function.decorators.nodes:
-            if isinstance(decorator, astroid.Call):
-                func = decorator.func
+        if isinstance(decorator, astroid.Name):
+            # expecting @fixture
+            return _check_name(decorator)
+        if isinstance(decorator, astroid.Attribute):
+            # expecting @pytest.fixture
+            return _check_attribute(decorator)
+        if isinstance(decorator, astroid.Call):
+            func = decorator.func
+            if isinstance(func, astroid.Name):
+                # expecting @fixture(scope=...)
+                return _check_name(func)
+            else:
+                # expecting @pytest.fixture(scope=...)
+                return _check_attribute(func)
 
-                if func and func.attrname in ('fixture', 'yield_fixture') \
-                        and func.expr.name == 'pytest':
-
-                    is_class = is_autouse = False
-
-                    for kwarg in decorator.keywords or []:
-                        if kwarg.arg == 'scope' and kwarg.value.value == 'class':
-                            is_class = True
-                        if kwarg.arg == 'autouse' and kwarg.value.value is True:
-                            is_autouse = True
-
-                    if is_class and is_autouse:
-                        return True
     except AttributeError:
         pass
 
